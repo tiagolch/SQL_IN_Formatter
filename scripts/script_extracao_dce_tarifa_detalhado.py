@@ -1,28 +1,57 @@
-
 import mysql.connector
 import pandas as pd
 from datetime import datetime
 import os
-from dotenv import load_dotenv
 from pathlib import Path
+from dotenv import load_dotenv
 
-load_dotenv()
-
-raiz_projeto = Path(__file__).resolve().parent.parent
+caminho_script = Path(__file__).resolve().parent
+raiz_projeto = caminho_script.parent
 pasta_extracoes = raiz_projeto / "extracoes"
 pasta_extracoes.mkdir(exist_ok=True)
 
+# Carrega as configurações
+load_dotenv(dotenv_path=raiz_projeto / ".env")
 
-def extrair_relatorio_erro(descricao_erro):
+def obter_conexao():
     config = {
         'user': os.getenv('BD_USER'),
         'password': os.getenv('BD_PASSWORD'),
         'host': os.getenv('BD_HOST'),
         'database': os.getenv('BD_DATABASE'),
-        'port': 3306
+        'port': 3306 
     }
+    if not config['host']:
+        raise ValueError("Variáveis de ambiente não carregadas. Verifique o arquivo .env na raiz.")
+    return mysql.connector.connect(**config)
 
-    query = """
+def extrair_todos_os_erros_detalhados():
+    query_consolidada = """
+    SELECT
+        fattaroper_descricao,
+        COUNT(1) as total_erros
+    FROM (
+        SELECT
+            fto.fattaroper_descricao,
+            (SELECT COUNT(1) 
+             FROM corrier_fat.fat_tarifas ft2 
+             WHERE ft2.encoid = ft.encoid 
+               AND ft2.fattar_id > ft.fattar_id 
+               AND ft2.fattar_situacao = ft.fattar_situacao) as tem_tarifa_posterior
+        FROM corrier_fat.fat_tarifas ft
+        INNER JOIN corrier_fat.fat_tarifas_operacoes fto ON (fto.fattar_id = ft.fattar_id)
+        INNER JOIN corrier.encomendas enc ON (enc.encoid = ft.encoid)
+        LEFT JOIN corrier_fat.fat_cte_tributos fct ON (fct.fattar_id = ft.fattar_id)
+        LEFT JOIN corrier_fat.fat_cte fc ON (fc.fatcte_id = fct.fatcte_id)
+        WHERE ft.fattar_data >= '2026-04-01'
+          AND ft.fattarstat_id IN (30)
+          AND (fc.fatctestat_id <> 3 OR fc.fatcte_id IS NULL)
+    ) as tabela 
+    WHERE tem_tarifa_posterior = 0
+    GROUP BY fattaroper_descricao;
+    """
+
+    query_detalhada = """
     SELECT DISTINCT
         IFNULL(remg.fantasia, rem.fantasia) as `Grupo`, 
         rem.reid as `Cliente Reid`,
@@ -102,35 +131,52 @@ def extrair_relatorio_erro(descricao_erro):
     """
 
     try:
-        conn = mysql.connector.connect(**config)
-
-        print(f"Executando busca para o erro: {descricao_erro}")
-
-        df = pd.read_sql(query, conn, params=(descricao_erro,))
-
-        if df.empty:
-            print("Nenhum dado encontrado para esta descrição.")
+        conn = obter_conexao()
+        
+        print("Buscando lista consolidada de erros no banco...")
+        df_erros = pd.read_sql(query_consolidada, conn)
+        
+        if df_erros.empty:
+            print("Nenhum erro encontrado com os parâmetros informados.")
             return
 
-        timestamp = datetime.now().strftime("%Y%m%d")
-        descricao_erro_sanitizada = descricao_erro.replace('/', '_').replace('\\', '_').replace(':', '_').replace(
-            '*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
-        nome_arquivo = f"{timestamp}_{descricao_erro_sanitizada}.xlsx"
+        print(f"Foram encontrados {len(df_erros)} tipos diferentes de erros. Iniciando extração detalhada...")
+        print("-" * 60)
 
-        caminho_final = pasta_extracoes / nome_arquivo
+        timestamp_execucao = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-        print(f"Exportando para: {caminho_final}")
-        df.to_excel(caminho_final, index=False, engine='openpyxl')
+        for index, linha in df_erros.iterrows():
+            descricao_erro = linha['fattaroper_descricao']
+            total_linhas = linha['total_erros']
+            
+            if pd.isna(descricao_erro) or str(descricao_erro).strip() == "":
+                descricao_erro = ""
+                print(f"[{index + 1}/{len(df_erros)}] Processando: '[ERRO SEM DESCRIÇÃO/VAZIO]' ({total_linhas} registros)...")
+                erro_sanitizado = "campo_erro_vazio"
+            else:
+                print(f"[{index + 1}/{len(df_erros)}] Processando: '{descricao_erro}' ({total_linhas} registros)...")
+                erro_sanitizado = "".join(x for x in descricao_erro[:40] if x.isalnum() or x in (' ', '_')).strip()
+                erro_sanitizado = erro_sanitizado.replace(' ', '_')
 
-        print(f"Arquivo gerado com sucesso: {nome_arquivo}")
+            df_detalhado = pd.read_sql(query_detalhada, conn, params=(descricao_erro,))
+
+            if not df_detalhado.empty:
+                nome_arquivo = f"{timestamp_execucao}_{erro_sanitizado}.xlsx"
+                caminho_final = pasta_extracoes / nome_arquivo
+
+                df_detalhado.to_excel(caminho_final, index=False, engine='openpyxl')
+                print(f"    -> Salvo com sucesso em: extracoes/{nome_arquivo}")
+            else:
+                print("    -> Alerta: Nenhuma linha detalhada retornada para este erro.")
+            
+            print("-" * 60)
+        print("\nProcesso concluído! Verifique a pasta 'extracoes'.")
 
     except Exception as e:
-        print(f"Erro: {e}")
+        print(f"Ocorreu um erro no processo: {e}")
     finally:
         if 'conn' in locals() and conn.is_connected():
             conn.close()
 
-
 if __name__ == "__main__":
-    erro_para_buscar = ""
-    extrair_relatorio_erro(erro_para_buscar)
+    extrair_todos_os_erros_detalhados()

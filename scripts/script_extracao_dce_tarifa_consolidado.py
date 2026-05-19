@@ -56,7 +56,6 @@ def extrair_ralatorio_consolidado():
                 and ft.fattarstat_id IN (30)
                 and (fc.fatctestat_id <> 3
                     OR fc.fatcte_id IS NULL)
-        -- 		and fto.fattaroper_descricao = ''
             HAVING
                 tem_tarifa_posterior = 0) as tabela	
         GROUP BY
@@ -66,7 +65,7 @@ def extrair_ralatorio_consolidado():
     try:
         conexao = mysql.connector.connect(**config)
         df = pd.read_sql(query, conexao)
-        nome_arquivo = f"{datetime.now().strftime('%Y%m%d')}_relatorio_consolidado_dce_tarifa.xlsx"
+        nome_arquivo = f"{datetime.now().strftime('%Y-%m-%d')}_relatorio_consolidado_dce_tarifa.xlsx"
         caminho_arquivo = pasta_extracoes / nome_arquivo
         df.to_excel(caminho_arquivo, index=False)
         print(f"Relatório consolidado salvo em: {caminho_arquivo}")
