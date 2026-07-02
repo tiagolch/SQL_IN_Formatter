@@ -178,7 +178,7 @@ elif pagina == "Gerador de Migration (CSV para UPDATE)":
                     st.download_button(
                         label="⬇️ Baixar Migration (.SQL)",
                         data=conteudo_sql,
-                        file_name="update_migration.txt",
+                        file_name="update_migration.sql",
                         mime="text/plain"
                     )
 
