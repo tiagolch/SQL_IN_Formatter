@@ -79,7 +79,7 @@ def extrair_relatorio_mensal():
         df = pd.read_sql(query, conn)
         conn.close()
         data_atual = datetime.now().strftime("%Y-%m-%d")
-        nome_arquivo = f"{data_atual}_relatorio_mensal.xlsx"
+        nome_arquivo = f"relatorio_mensal_{data_atual}.xlsx"
         caminho_arquivo = pasta_extracoes / nome_arquivo
         df.to_excel(caminho_arquivo, index=False, engine='openpyxl')
         print(f"Relatório mensal exportado com sucesso para: {caminho_arquivo}")

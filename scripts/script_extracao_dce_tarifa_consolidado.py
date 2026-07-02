@@ -65,7 +65,7 @@ def extrair_ralatorio_consolidado():
     try:
         conexao = mysql.connector.connect(**config)
         df = pd.read_sql(query, conexao)
-        nome_arquivo = f"{datetime.now().strftime('%Y-%m-%d')}_relatorio_consolidado_dce_tarifa.xlsx"
+        nome_arquivo = f"relatorio_consolidado_dce_tarifa_{datetime.now().strftime('%Y-%m-%d')}.xlsx"
         caminho_arquivo = pasta_extracoes / nome_arquivo
         df.to_excel(caminho_arquivo, index=False)
         print(f"Relatório consolidado salvo em: {caminho_arquivo}")

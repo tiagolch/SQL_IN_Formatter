@@ -53,11 +53,11 @@ def extrair_todos_os_erros_detalhados():
 
     query_detalhada = """
     SELECT DISTINCT
+        enc.data as 'Data da Encomenda',
         IFNULL(remg.fantasia, rem.fantasia) as `Grupo`, 
         rem.reid as `Cliente Reid`,
         rem.fantasia as `Cliente`,
         enc.encoid as `Encoid`, 
-        enc.data as 'Data da Encomenda',
         rem.reid_parent,
         enc.reid,
         enc.agid,
@@ -68,10 +68,12 @@ def extrair_todos_os_erros_detalhados():
         enc.awb as `AWB`,
         enc.ultimostatid as `Ultimo Status Encomenda`,
         s.statdesc as `Descricao Status Encomenda`,
+        t.tiposervico_nome as `Tipo Servico`,
         ft.fattar_id as `TarifaID`, 
         ft.fattar_data as `Data Tarifa`, 
         ft.fattarstat_id as `Status Tarifa`,
         ft.fattar_situacao as `Situacao Tarifa`,
+        ft.fattar_total as `Valor Tarifa`,
         fts.fattarstat_desc as `Status Tarifa Descricao`,
         fto.fattaroper_descricao as `Operacao Tarifa Descricao`,
         fto.fattaroper_tipo as `Operacao Tipo`,
@@ -108,6 +110,7 @@ def extrair_todos_os_erros_detalhados():
     LEFT JOIN corrier.encomendas_tarifa_controle etc ON (etc.encoid = enc.encoid)
     LEFT JOIN corrier.ceprota cr on (cr.cep = enc.cep)
     LEFT JOIN corrier.encomendas_nfe doc on (doc.encoid = enc.encoid)
+    inner join corrier.tiposervico t on enc.tiposervico = t.tiposervico_id
     WHERE 1=1 
     AND ft.fattar_id IN (
         SELECT fattar_id FROM (
@@ -161,7 +164,7 @@ def extrair_todos_os_erros_detalhados():
             df_detalhado = pd.read_sql(query_detalhada, conn, params=(descricao_erro,))
 
             if not df_detalhado.empty:
-                nome_arquivo = f"{timestamp_execucao}_{erro_sanitizado}.xlsx"
+                nome_arquivo = f"{erro_sanitizado}_{timestamp_execucao}.xlsx"
                 caminho_final = pasta_extracoes / nome_arquivo
 
                 df_detalhado.to_excel(caminho_final, index=False, engine='openpyxl')
