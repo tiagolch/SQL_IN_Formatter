@@ -106,33 +106,57 @@ elif pagina == "Gerador de Query Dinâmica":
 # ==========================================
 # FERRAMENTA 3: GERADOR DE MIGRATION (INSERT)
 # ==========================================
-elif pagina == "Gerador de Migration (CSV para INSERT)":
-    st.title("📂 Gerador de Migration (CSV para INSERT)")
+elif pagina == "Gerador de Migration (CSV para INSERT)":  # Mantido o ID de navegação original
+    st.title("📂 Gerador de Migration (CSV/JSON para INSERT)")
     st.markdown("""
-    Suba o arquivo CSV extraído do banco para gerar um script de migração contendo os comandos de `INSERT` estruturados linha por linha.
+    Suba um arquivo **CSV** ou o **DUMP JSON** extraído do banco para gerar um script de migração respeitando rigorosamente a tipagem dos dados.
     """)
 
     # Configurações na barra lateral
     nome_tabela = st.sidebar.text_input("Tabela Alvo (Schema.Tabela):", value="corrier_fat.fat_cte")
+    tipo_arquivo = st.sidebar.selectbox("Tipo de Arquivo de Entrada:", ["CSV", "JSON"])
     
-    separador = st.sidebar.selectbox("Separador do CSV:", [";", ",", "\\t"], index=0, 
-                                     format_func=lambda x: "Ponto e Vírgula (;)" if x == ";" else "Vírgula (,)" if x == "," else "Tabulação / TSV (\\t)")
+    separador = ";"
+    if tipo_arquivo == "CSV":
+        separador = st.sidebar.selectbox("Separador do CSV:", [";", ",", "\\t"], index=0, 
+                                         format_func=lambda x: "Ponto e Vírgula (;)" if x == ";" else "Vírgula (,)" if x == "," else "Tabulação / TSV (\\t)")
 
-    file_csv = st.file_uploader("Suba o arquivo CSV", type=["csv", "txt"], key="migration_csv")
+    file_input = st.file_uploader("Suba o arquivo (CSV ou JSON)", type=["csv", "json", "txt"], key="migration_input")
 
-    if file_csv:
+    if file_input:
         try:
-            sep_atual = "\t" if separador == "\\t" else separador
-            
-            # Carrega o CSV tratando células vazias como strings vazias em vez de carregar como NaN (nulo do pandas)
-            df = pd.read_csv(file_csv, sep=sep_atual, engine='python', keep_default_na=False)
-            st.success(f"CSV carregado com sucesso! Contém {len(df)} registros detectados.")
+            if tipo_arquivo == "JSON":
+                import json
+                # Carrega o JSON bruto como dicionário/lista nativa do Python para não perder a tipagem
+                conteudo_json = json.loads(file_input.getvalue().decode("utf-8"))
+                
+                # Desembrulha a query se for o formato do DBeaver
+                if isinstance(conteudo_json, dict):
+                    dados_reais = None
+                    for chave, valor in conteudo_json.items():
+                        if isinstance(valor, list):
+                            dados_reais = valor
+                            break
+                    if dados_reais is None:
+                        dados_reais = [conteudo_json]
+                else:
+                    dados_reais = conteudo_json
+                
+                # Criamos o DataFrame SEM converter tipos para preservar None/int/float originais
+                df = pd.DataFrame(dados_reais)
+                is_json_mode = True
+            else:
+                sep_atual = "\t" if separador == "\\t" else separador
+                df = pd.read_csv(file_input, sep=sep_atual, engine='python', keep_default_na=False)
+                is_json_mode = False
+                
+            st.success(f"Arquivo carregado com sucesso! Contém {len(df)} registros detectados.")
             
             if st.button("Gerar Script de Migration (INSERT)"):
                 output_sql = io.StringIO()
                 
                 output_sql.write("-- ====================================================\n")
-                output_sql.write(f"-- MIGRATION: Inserts automáticos via CSV ({file_csv.name})\n")
+                output_sql.write(f"-- MIGRATION: Inserts automáticos via {tipo_arquivo} ({file_input.name})\n")
                 output_sql.write("-- ====================================================\n")
                 output_sql.write("BEGIN TRANSACTION;\n\n")
 
@@ -143,25 +167,43 @@ elif pagina == "Gerador de Migration (CSV para INSERT)":
                     valores_linha = []
 
                     for col, val in row.items():
-                        # Trata strings estritamente vazias ou textos salvos como 'NULL'
-                        if val == '' or val == 'NULL':
-                            valores_linha.append("''")
-                        # Trata valores numéricos (caso o pandas tenha identificado o tipo)
-                        elif isinstance(val, (int, float)) and not isinstance(val, bool):
-                            if math.isnan(val):
-                                valores_linha.append("NULL") # Mantém NULL para numéricos puros não quebrarem o banco
+                        
+                        # --- REGRA CRÍTICA PARA MODO JSON (Preserva Tipagem do Objeto) ---
+                        if is_json_mode:
+                            # Se for null legítimo do JSON (Python None) ou se o Pandas preencheu com NaN
+                            if val is None or (isinstance(val, float) and math.isnan(val)):
+                                valores_linha.append("NULL")
+                            # Se for String vazia "" legítima do JSON
+                            elif val == '':
+                                valores_linha.append("''")
+                            # Se for Inteiro Puro
+                            elif isinstance(val, int) and not isinstance(val, bool):
+                                valores_linha.append(str(val))
+                            # Se for Decimal/Float Puro
+                            elif isinstance(val, float) and not isinstance(val, bool):
+                                valores_linha.append(str(val))
+                            # Se for Booleano Puro
+                            elif isinstance(val, bool):
+                                valores_linha.append(str(val).upper())
+                            # Qualquer outro dado de texto (String com caracteres)
                             else:
-                                if isinstance(val, float) and val.is_integer():
-                                    valores_linha.append(str(int(val)))
-                                else:
-                                    valores_linha.append(str(val))
-                        # Trata booleanos
-                        elif isinstance(val, bool):
-                            valores_linha.append(str(val).upper())
-                        # Trata strings normais, datas e outros textos
+                                val_clean = str(val).replace("'", "''")
+                                valores_linha.append(f"'{val_clean}'")
+                                
+                        # --- REGRA PARA MODO CSV (Tudo é Lido como String via keep_default_na=False) ---
                         else:
-                            val_clean = str(val).replace("'", "''")
-                            valores_linha.append(f"'{val_clean}'")
+                            val_str = str(val).strip()
+                            if val_str == '' or val_str == 'NULL':
+                                valores_linha.append("''")
+                            elif val_str.isdigit():
+                                valores_linha.append(val_str)
+                            elif val_str.replace('.', '', 1).isdigit() and val_str.count('.') == 1:
+                                valores_linha.append(val_str)
+                            elif val_str.upper() in ['TRUE', 'FALSE']:
+                                valores_linha.append(val_str.upper())
+                            else:
+                                val_clean = val_str.replace("'", "''")
+                                valores_linha.append(f"'{val_clean}'")
 
                     if valores_linha:
                         valores_formatados = ", ".join(valores_linha)
@@ -186,4 +228,4 @@ elif pagina == "Gerador de Migration (CSV para INSERT)":
                 st.code("\n".join(preview_linhas), language="sql")
                     
         except Exception as e:
-            st.error(f"Erro ao processar o arquivo CSV: {e}")
+            st.error(f"Erro ao processar o arquivo: {e}")
