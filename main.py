@@ -9,7 +9,7 @@ st.set_page_config(page_title="Canivete Suíço SQL", page_icon="🛠️", layou
 st.sidebar.title("Navegação")
 pagina = st.sidebar.radio(
     "Selecione a Ferramenta:", 
-    ["Formatar Lista (IN)", "Gerador de Query Dinâmica", "Gerador de Migration (CSV para UPDATE)"]
+    ["Formatar Lista (IN)", "Gerador de Query Dinâmica", "Gerador de Migration (CSV para INSERT)"]
 )
 
 def ler_arquivo(uploaded_file):
@@ -76,7 +76,7 @@ elif pagina == "Gerador de Query Dinâmica":
             if "<id>" not in query_modelo:
                 st.error("Erro: A tag <id> não foi encontrada no seu modelo de query!")
             else:
-                queries_geradas = []
+                queries_generadas = []
                 
                 for item in ids:
                     valor_final = f"'{item}'" if "Texto" in tipo_id else item
@@ -85,9 +85,9 @@ elif pagina == "Gerador de Query Dinâmica":
                     if adicionar_ponto_virgula and not nova_query.endswith(";"):
                         nova_query += ";"
                         
-                    queries_geradas.append(nova_query)
+                    queries_generadas.append(nova_query)
 
-                resultado_completo = "\n".join(queries_geradas)
+                resultado_completo = "\n".join(queries_generadas)
 
                 st.success("Processamento concluído!")
                 
@@ -99,21 +99,20 @@ elif pagina == "Gerador de Query Dinâmica":
                 )
                 
                 st.subheader("Prévia do Script:")
-                st.code("\n".join(queries_geradas[:50]), language="sql")
-                if len(queries_geradas) > 50:
-                    st.warning(f"Exibindo apenas as primeiras 50 de {len(queries_geradas)} queries. Baixe o arquivo para ver tudo.")
+                st.code("\n".join(queries_generadas[:50]), language="sql")
+                if len(queries_generadas) > 50:
+                    st.warning(f"Exibindo apenas as primeiras 50 de {len(queries_generadas)} queries. Baixe o arquivo para ver tudo.")
 
 # ==========================================
-# FERRAMENTA 3: GERADOR DE MIGRATION (NOVA)
+# FERRAMENTA 3: GERADOR DE MIGRATION (INSERT)
 # ==========================================
-elif pagina == "Gerador de Migration (CSV para UPDATE)":
-    st.title("📂 Gerador de Migration (CSV para UPDATE)")
+elif pagina == "Gerador de Migration (CSV para INSERT)":
+    st.title("📂 Gerador de Migration (CSV para INSERT)")
     st.markdown("""
-    Suba o arquivo CSV extraído do banco para gerar um script de migração contendo os comandos de `UPDATE` estruturados linha por linha.
+    Suba o arquivo CSV extraído do banco para gerar um script de migração contendo os comandos de `INSERT` estruturados linha por linha.
     """)
 
     nome_tabela = st.sidebar.text_input("Tabela Alvo (Schema.Tabela):", value="corrier_fat.fat_cte")
-    coluna_chave = st.sidebar.text_input("Coluna Chave (WHERE):", value="fatcli_id")
 
     file_csv = st.file_uploader("Suba o arquivo CSV", type=["csv"], key="migration_csv")
 
@@ -122,69 +121,63 @@ elif pagina == "Gerador de Migration (CSV para UPDATE)":
             df = pd.read_csv(file_csv)
             st.success(f"CSV carregado com sucesso! Contém {len(df)} registros detectados.")
             
-            if coluna_chave not in df.columns:
-                st.error(f"Erro: A coluna chave '{coluna_chave}' não foi encontrada no CSV enviado. Verifique o cabeçalho.")
-            else:
-                if st.button("Gerar Script de Migration"):
-                    output_sql = io.StringIO()
-                    
-                    output_sql.write("-- ====================================================\n")
-                    output_sql.write(f"-- MIGRATION: Updates automáticos via CSV ({file_csv.name})\n")
-                    output_sql.write("-- ====================================================\n")
-                    output_sql.write("BEGIN TRANSACTION;\n\n")
+            if st.button("Gerar Script de Migration (INSERT)"):
+                output_sql = io.StringIO()
+                
+                output_sql.write("-- ====================================================\n")
+                output_sql.write(f"-- MIGRATION: Inserts automáticos via CSV ({file_csv.name})\n")
+                output_sql.write("-- ====================================================\n")
+                output_sql.write("BEGIN TRANSACTION;\n\n")
 
-                    linhas_processadas = 0
+                # Obtém a lista de todas as colunas do cabeçalho do CSV para o INSERT
+                colunas_tabela = ", ".join(df.columns)
+                linhas_processadas = 0
 
-                    for index, row in df.iterrows():
-                        if pd.isna(row[coluna_chave]):
-                            continue
-                        
-                        val_chave = row[coluna_chave]
-                        if isinstance(val_chave, float) and val_chave.is_integer():
-                            val_chave = int(val_chave)
-                        
-                        set_clauses = []
+                for index, row in df.iterrows():
+                    valores_linha = []
 
-                        for col, val in row.items():
-                            if col == coluna_chave:
-                                continue
-                            
-                            if pd.isna(val) or val == 'NULL' or val == '':
-                                set_clauses.append(f"{col} = NULL")
-                            elif isinstance(val, (int, float)) and not isinstance(val, bool):
-                                if math.isnan(val):
-                                    set_clauses.append(f"{col} = NULL")
-                                else:
-                                    if isinstance(val, float) and val.is_integer():
-                                        set_clauses.append(f"{col} = {int(val)}")
-                                    else:
-                                        set_clauses.append(f"{col} = {val}")
-                            elif isinstance(val, bool):
-                                set_clauses.append(f"{col} = {str(val).upper()}")
+                    for col, val in row.items():
+                        # Trata valores nulos ou vazios
+                        if pd.isna(val) or val == 'NULL' or val == '':
+                            valores_linha.append("NULL")
+                        # Trata valores numéricos
+                        elif isinstance(val, (int, float)) and not isinstance(val, bool):
+                            if math.isnan(val):
+                                valores_linha.append("NULL")
                             else:
-                                val_clean = str(val).replace("'", "''")
-                                set_clauses.append(f"{col} = '{val_clean}'")
+                                if isinstance(val, float) and val.is_integer():
+                                    valores_linha.append(str(int(val)))
+                                else:
+                                    valores_linha.append(str(val))
+                        # Trata booleanos
+                        elif isinstance(val, bool):
+                            valores_linha.append(str(val).upper())
+                        # Trata strings, textos e datas
+                        else:
+                            val_clean = str(val).replace("'", "''")
+                            valores_linha.append(f"'{val_clean}'")
 
-                        if set_clauses:
-                            sql_update = f"UPDATE {nome_tabela} SET {', '.join(set_clauses)} WHERE {coluna_chave} = {val_chave};\n"
-                            output_sql.write(sql_update)
-                            linhas_processadas += 1
-                            
-                    output_sql.write("\nCOMMIT;\n")
-                    conteudo_sql = output_sql.getvalue()
+                    if valores_linha:
+                        valores_formatados = ", ".join(valores_linha)
+                        sql_insert = f"INSERT INTO {nome_tabela} ({colunas_tabela}) VALUES ({valores_formatados});\n"
+                        output_sql.write(sql_insert)
+                        linhas_processadas += 1
+                        
+                output_sql.write("\nCOMMIT;\n")
+                conteudo_sql = output_sql.getvalue()
 
-                    st.success(f"Sucesso! Gerados {linhas_processadas} comandos de UPDATE.")
-                    
-                    st.download_button(
-                        label="⬇️ Baixar Migration (.SQL)",
-                        data=conteudo_sql,
-                        file_name="update_migration.sql",
-                        mime="text/plain"
-                    )
+                st.success(f"Sucesso! Gerados {linhas_processadas} comandos de INSERT.")
+                
+                st.download_button(
+                    label="⬇️ Baixar Migration (.SQL)",
+                    data=conteudo_sql,
+                    file_name="insert_migration.txt",
+                    mime="text/plain"
+                )
 
-                    st.subheader("Prévia das primeiras linhas do script:")
-                    preview_linhas = conteudo_sql.splitlines()[:25]
-                    st.code("\n".join(preview_linhas), language="sql")
+                st.subheader("Prévia das primeiras linhas do script:")
+                preview_linhas = conteudo_sql.splitlines()[:25]
+                st.code("\n".join(preview_linhas), language="sql")
                     
         except Exception as e:
             st.error(f"Erro ao processar o arquivo CSV: {e}")
