@@ -112,13 +112,22 @@ elif pagina == "Gerador de Migration (CSV para INSERT)":
     Suba o arquivo CSV extraído do banco para gerar um script de migração contendo os comandos de `INSERT` estruturados linha por linha.
     """)
 
+    # Configurações na barra lateral
     nome_tabela = st.sidebar.text_input("Tabela Alvo (Schema.Tabela):", value="corrier_fat.fat_cte")
+    
+    # NOVA OPÇÃO: Seletor de separador para evitar o erro de tokenização
+    separador = st.sidebar.selectbox("Separador do CSV:", [";", ",", "\\t"], index=0, 
+                                     format_func=lambda x: "Ponto e Vírgula (;)" if x == ";" else "Vírgula (,)" if x == "," else "Tabulação / TSV (\\t)")
 
-    file_csv = st.file_uploader("Suba o arquivo CSV", type=["csv"], key="migration_csv")
+    file_csv = st.file_uploader("Suba o arquivo CSV", type=["csv", "txt"], key="migration_csv")
 
     if file_csv:
         try:
-            df = pd.read_csv(file_csv)
+            # Resolvendo o caractere de tabulação se for o caso
+            sep_atual = "\t" if separador == "\\t" else separador
+            
+            # Carrega o CSV usando o separador correto e a engine Python para tolerar textos complexos
+            df = pd.read_csv(file_csv, sep=sep_atual, engine='python')
             st.success(f"CSV carregado com sucesso! Contém {len(df)} registros detectados.")
             
             if st.button("Gerar Script de Migration (INSERT)"):
@@ -129,7 +138,6 @@ elif pagina == "Gerador de Migration (CSV para INSERT)":
                 output_sql.write("-- ====================================================\n")
                 output_sql.write("BEGIN TRANSACTION;\n\n")
 
-                # Obtém a lista de todas as colunas do cabeçalho do CSV para o INSERT
                 colunas_tabela = ", ".join(df.columns)
                 linhas_processadas = 0
 
@@ -137,10 +145,8 @@ elif pagina == "Gerador de Migration (CSV para INSERT)":
                     valores_linha = []
 
                     for col, val in row.items():
-                        # Trata valores nulos ou vazios
                         if pd.isna(val) or val == 'NULL' or val == '':
                             valores_linha.append("NULL")
-                        # Trata valores numéricos
                         elif isinstance(val, (int, float)) and not isinstance(val, bool):
                             if math.isnan(val):
                                 valores_linha.append("NULL")
@@ -149,10 +155,8 @@ elif pagina == "Gerador de Migration (CSV para INSERT)":
                                     valores_linha.append(str(int(val)))
                                 else:
                                     valores_linha.append(str(val))
-                        # Trata booleanos
                         elif isinstance(val, bool):
                             valores_linha.append(str(val).upper())
-                        # Trata strings, textos e datas
                         else:
                             val_clean = str(val).replace("'", "''")
                             valores_linha.append(f"'{val_clean}'")
@@ -169,7 +173,7 @@ elif pagina == "Gerador de Migration (CSV para INSERT)":
                 st.success(f"Sucesso! Gerados {linhas_processadas} comandos de INSERT.")
                 
                 st.download_button(
-                    label="⬇️ Baixar Migration (.SQL)",
+                    label="⬇️ Baixar Migration (.txt)",
                     data=conteudo_sql,
                     file_name="insert_migration.txt",
                     mime="text/plain"
