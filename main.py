@@ -217,9 +217,9 @@ elif pagina == "Gerador de Migration (CSV para INSERT)":  # Mantido o ID de nave
                 st.success(f"Sucesso! Gerados {linhas_processadas} comandos de INSERT.")
                 
                 st.download_button(
-                    label="⬇️ Baixar Migration (.SQL)",
+                    label="⬇️ Baixar Migration (.txt)",
                     data=conteudo_sql,
-                    file_name="insert_migration.sql",
+                    file_name="insert_migration.txt",
                     mime="text/plain"
                 )
 
