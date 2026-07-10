@@ -3,13 +3,19 @@ import streamlit as st
 import pandas as pd
 import math
 import io
+import xml.dom.minidom  # Biblioteca nativa para manipulação e indentação de XML
 
-st.set_page_config(page_title="Canivete Suíço SQL", page_icon="🛠️", layout="wide")
+st.set_page_config(page_title="Canivete Suíço SQL & Dados", page_icon="🛠️", layout="wide")
 
 st.sidebar.title("Navegação")
 pagina = st.sidebar.radio(
     "Selecione a Ferramenta:", 
-    ["Formatar Lista (IN)", "Gerador de Query Dinâmica", "Gerador de Migration (CSV para INSERT)"]
+    [
+        "Formatar Lista (IN)", 
+        "Gerador de Query Dinâmica", 
+        "Gerador de Migration (CSV para UPDATE)",
+        "Formatador de XML"  # Nova funcionalidade adicionada aqui
+    ]
 )
 
 def ler_arquivo(uploaded_file):
@@ -76,7 +82,7 @@ elif pagina == "Gerador de Query Dinâmica":
             if "<id>" not in query_modelo:
                 st.error("Erro: A tag <id> não foi encontrada no seu modelo de query!")
             else:
-                queries_generadas = []
+                queries_geradas = []
                 
                 for item in ids:
                     valor_final = f"'{item}'" if "Texto" in tipo_id else item
@@ -85,9 +91,9 @@ elif pagina == "Gerador de Query Dinâmica":
                     if adicionar_ponto_virgula and not nova_query.endswith(";"):
                         nova_query += ";"
                         
-                    queries_generadas.append(nova_query)
+                    queries_geradas.append(nova_query)
 
-                resultado_completo = "\n".join(queries_generadas)
+                resultado_completo = "\n".join(queries_geradas)
 
                 st.success("Processamento concluído!")
                 
@@ -99,133 +105,136 @@ elif pagina == "Gerador de Query Dinâmica":
                 )
                 
                 st.subheader("Prévia do Script:")
-                st.code("\n".join(queries_generadas[:50]), language="sql")
-                if len(queries_generadas) > 50:
-                    st.warning(f"Exibindo apenas as primeiras 50 de {len(queries_generadas)} queries. Baixe o arquivo para ver tudo.")
+                st.code("\n".join(queries_geradas[:50]), language="sql")
+                if len(queries_geradas) > 50:
+                    st.warning(f"Exibindo apenas as primeiras 50 de {len(queries_geradas)} queries. Baixe o arquivo para ver tudo.")
 
 # ==========================================
-# FERRAMENTA 3: GERADOR DE MIGRATION (INSERT)
+# FERRAMENTA 3: GERADOR DE MIGRATION (CSV para UPDATE)
 # ==========================================
-elif pagina == "Gerador de Migration (CSV para INSERT)":  # Mantido o ID de navegação original
-    st.title("📂 Gerador de Migration (CSV/JSON para INSERT)")
+elif pagina == "Gerador de Migration (CSV para UPDATE)":
+    st.title("📂 Gerador de Migration (CSV para UPDATE)")
     st.markdown("""
-    Suba um arquivo **CSV** ou o **DUMP JSON** extraído do banco para gerar um script de migração respeitando rigorosamente a tipagem dos dados.
+    Suba o arquivo CSV extraído do banco para gerar um script de migração contendo os comandos de `UPDATE` estruturados linha por linha.
     """)
 
-    # Configurações na barra lateral
     nome_tabela = st.sidebar.text_input("Tabela Alvo (Schema.Tabela):", value="corrier_fat.fat_cte")
-    tipo_arquivo = st.sidebar.selectbox("Tipo de Arquivo de Entrada:", ["CSV", "JSON"])
-    
-    separador = ";"
-    if tipo_arquivo == "CSV":
-        separador = st.sidebar.selectbox("Separador do CSV:", [";", ",", "\\t"], index=0, 
-                                         format_func=lambda x: "Ponto e Vírgula (;)" if x == ";" else "Vírgula (,)" if x == "," else "Tabulação / TSV (\\t)")
+    coluna_chave = st.sidebar.text_input("Coluna Chave (WHERE):", value="fatcli_id")
 
-    file_input = st.file_uploader("Suba o arquivo (CSV ou JSON)", type=["csv", "json", "txt"], key="migration_input")
+    file_csv = st.file_uploader("Suba o arquivo CSV", type=["csv"], key="migration_csv")
 
-    if file_input:
+    if file_csv:
         try:
-            if tipo_arquivo == "JSON":
-                import json
-                # Carrega o JSON bruto como dicionário/lista nativa do Python para não perder a tipagem
-                conteudo_json = json.loads(file_input.getvalue().decode("utf-8"))
-                
-                # Desembrulha a query se for o formato do DBeaver
-                if isinstance(conteudo_json, dict):
-                    dados_reais = None
-                    for chave, valor in conteudo_json.items():
-                        if isinstance(valor, list):
-                            dados_reais = valor
-                            break
-                    if dados_reais is None:
-                        dados_reais = [conteudo_json]
-                else:
-                    dados_reais = conteudo_json
-                
-                # Criamos o DataFrame SEM converter tipos para preservar None/int/float originais
-                df = pd.DataFrame(dados_reais)
-                is_json_mode = True
-            else:
-                sep_atual = "\t" if separador == "\\t" else separador
-                df = pd.read_csv(file_input, sep=sep_atual, engine='python', keep_default_na=False)
-                is_json_mode = False
-                
-            st.success(f"Arquivo carregado com sucesso! Contém {len(df)} registros detectados.")
+            df = pd.read_csv(file_csv)
+            st.success(f"CSV carregado com sucesso! Contém {len(df)} registros detectados.")
             
-            if st.button("Gerar Script de Migration (INSERT)"):
-                output_sql = io.StringIO()
-                
-                output_sql.write("-- ====================================================\n")
-                output_sql.write(f"-- MIGRATION: Inserts automáticos via {tipo_arquivo} ({file_input.name})\n")
-                output_sql.write("-- ====================================================\n")
-                output_sql.write("BEGIN TRANSACTION;\n\n")
+            if coluna_chave not in df.columns:
+                st.error(f"Erro: A coluna chave '{coluna_chave}' não foi encontrada no CSV enviado. Verifique o cabeçalho.")
+            else:
+                if st.button("Gerar Script de Migration"):
+                    output_sql = io.StringIO()
+                    
+                    output_sql.write("-- ====================================================\n")
+                    output_sql.write(f"-- MIGRATION: Updates automáticos via CSV ({file_csv.name})\n")
+                    output_sql.write("-- ====================================================\n")
+                    output_sql.write("BEGIN TRANSACTION;\n\n")
 
-                colunas_tabela = ", ".join(df.columns)
-                linhas_processadas = 0
+                    linhas_processadas = 0
 
-                for index, row in df.iterrows():
-                    valores_linha = []
-
-                    for col, val in row.items():
+                    for index, row in df.iterrows():
+                        if pd.isna(row[coluna_chave]):
+                            continue
                         
-                        # --- REGRA CRÍTICA PARA MODO JSON (Preserva Tipagem do Objeto) ---
-                        if is_json_mode:
-                            # Se for null legítimo do JSON (Python None) ou se o Pandas preencheu com NaN
-                            if val is None or (isinstance(val, float) and math.isnan(val)):
-                                valores_linha.append("NULL")
-                            # Se for String vazia "" legítima do JSON
-                            elif val == '':
-                                valores_linha.append("''")
-                            # Se for Inteiro Puro
-                            elif isinstance(val, int) and not isinstance(val, bool):
-                                valores_linha.append(str(val))
-                            # Se for Decimal/Float Puro
-                            elif isinstance(val, float) and not isinstance(val, bool):
-                                valores_linha.append(str(val))
-                            # Se for Booleano Puro
+                        val_chave = row[coluna_chave]
+                        if isinstance(val_chave, float) and val_chave.is_integer():
+                            val_chave = int(val_chave)
+                        
+                        set_clauses = []
+
+                        for col, val in row.items():
+                            if col == coluna_chave:
+                                continue
+                            
+                            if pd.isna(val) or val == 'NULL' or val == '':
+                                set_clauses.append(f"{col} = NULL")
+                            elif isinstance(val, (int, float)) and not isinstance(val, bool):
+                                if math.isnan(val):
+                                    set_clauses.append(f"{col} = NULL")
+                                else:
+                                    if isinstance(val, float) and val.is_integer():
+                                        set_clauses.append(f"{col} = {int(val)}")
+                                    else:
+                                        set_clauses.append(f"{col} = {val}")
                             elif isinstance(val, bool):
-                                valores_linha.append(str(val).upper())
-                            # Qualquer outro dado de texto (String com caracteres)
+                                set_clauses.append(f"{col} = {str(val).upper()}")
                             else:
                                 val_clean = str(val).replace("'", "''")
-                                valores_linha.append(f"'{val_clean}'")
-                                
-                        # --- REGRA PARA MODO CSV (Tudo é Lido como String via keep_default_na=False) ---
-                        else:
-                            val_str = str(val).strip()
-                            if val_str == '' or val_str == 'NULL':
-                                valores_linha.append("''")
-                            elif val_str.isdigit():
-                                valores_linha.append(val_str)
-                            elif val_str.replace('.', '', 1).isdigit() and val_str.count('.') == 1:
-                                valores_linha.append(val_str)
-                            elif val_str.upper() in ['TRUE', 'FALSE']:
-                                valores_linha.append(val_str.upper())
-                            else:
-                                val_clean = val_str.replace("'", "''")
-                                valores_linha.append(f"'{val_clean}'")
+                                set_clauses.append(f"{col} = '{val_clean}'")
 
-                    if valores_linha:
-                        valores_formatados = ", ".join(valores_linha)
-                        sql_insert = f"INSERT INTO {nome_tabela} ({colunas_tabela}) VALUES ({valores_formatados});\n"
-                        output_sql.write(sql_insert)
-                        linhas_processadas += 1
-                        
-                output_sql.write("\nCOMMIT;\n")
-                conteudo_sql = output_sql.getvalue()
+                        if set_clauses:
+                            sql_update = f"UPDATE {nome_tabela} SET {', '.join(set_clauses)} WHERE {coluna_chave} = {val_chave};\n"
+                            output_sql.write(sql_update)
+                            linhas_processadas += 1
+                            
+                    output_sql.write("\nCOMMIT;\n")
+                    conteudo_sql = output_sql.getvalue()
 
-                st.success(f"Sucesso! Gerados {linhas_processadas} comandos de INSERT.")
-                
-                st.download_button(
-                    label="⬇️ Baixar Migration (.txt)",
-                    data=conteudo_sql,
-                    file_name="insert_migration.txt",
-                    mime="text/plain"
-                )
+                    st.success(f"Sucesso! Gerados {linhas_processadas} comandos de UPDATE.")
+                    
+                    st.download_button(
+                        label="⬇️ Baixar Migration (.SQL)",
+                        data=conteudo_sql,
+                        file_name="update_migration.sql",
+                        mime="text/plain"
+                    )
 
-                st.subheader("Prévia das primeiras linhas do script:")
-                preview_linhas = conteudo_sql.splitlines()[:25]
-                st.code("\n".join(preview_linhas), language="sql")
+                    st.subheader("Prévia das primeiras linhas do script:")
+                    preview_linhas = conteudo_sql.splitlines()[:25]
+                    st.code("\n".join(preview_linhas), language="sql")
                     
         except Exception as e:
-            st.error(f"Erro ao processar o arquivo: {e}")
+            st.error(f"Erro ao processar o arquivo CSV: {e}")
+
+# ==========================================
+# FERRAMENTA 4: FORMATADOR DE XML (NOVA!)
+# ==========================================
+elif pagina == "Formatador de XML":
+    st.title("🗂️ Formatador e Indentador de XML")
+    st.markdown("Cole seu XML minificado ou bagunçado (ou faça o upload do arquivo) para indentá-lo corretamente.")
+
+    reentrancia = st.sidebar.slider("Espaços de Indentação:", min_value=2, max_value=8, value=4, step=2)
+
+    xml_input = ""
+    upload_xml = st.file_uploader("Suba o arquivo .xml (Opcional)", type=["xml"], key="xml_uploader")
+    
+    if upload_xml is not None:
+        xml_input = upload_xml.getvalue().decode("utf-8")
+    else:
+        xml_input = st.text_area("Ou cole o XML bruto aqui:", height=250)
+
+    if xml_input.strip():
+        if st.button("Formatar XML"):
+            try:
+                xml_puro = "".join([line.strip() for line in xml_input.splitlines()])
+                
+                dom = xml.dom.minidom.parseString(xml_puro)
+                
+                xml_formatado = dom.toprettyxml(indent=" " * reentrancia)
+                
+                linhas_limpas = [linha for linha in xml_formatado.splitlines() if linha.strip()]
+                xml_final = "\n".join(linhas_limpas)
+
+                st.success("XML formatado com sucesso!")
+                
+                st.download_button(
+                    label="⬇️ Baixar XML Formatado",
+                    data=xml_final,
+                    file_name="arquivo_formatado.xml",
+                    mime="application/xml"
+                )
+                
+                st.subheader("Visualização do XML:")
+                st.code(xml_final, language="xml")
+                
+            except Exception as e:
+                st.error(f"Erro ao processar o XML. Verifique se a estrutura está correta e sem tags abertas. Detalhe: {e}")
